@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GPS Tracker Dashboard</title>
+
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+
+    <style>
+      /* Basic styling for the page */
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+      }
+
+      header {
+        background-color: #4caf50;
+        color: white;
+        padding: 10px 20px;
+        text-align: center;
+        font-size: 24px;
+      }
+
+      main {
+        display: flex;
+        flex: 1;
+      }
+
+      #sidebar {
+        width: 250px;
+        background-color: #f4f4f4;
+        padding: 20px;
+        border-right: 1px solid #ddd;
+        overflow-y: auto;
+      }
+
+      #map-container {
+        flex-grow: 1;
+        background-color: #eee;
+        height: 100%;
+        min-height: 400px; /* Ensures map has a minimum visible height */
+      }
+
+      footer {
+        background-color: #333;
+        color: white;
+        text-align: center;
+        padding: 10px 0;
+        font-size: 12px;
+      }
+
+      #sidebar h2 {
+        color: #333;
+        margin-top: 0;
+        border-bottom: 1px solid #ccc;
+        padding-bottom: 5px;
+      }
+
+      #sidebar p {
+        margin-bottom: 10px;
+        line-height: 1.5;
+      }
+
+      #sidebar strong {
+        color: #555;
+      }
+    </style>
+  </head>
+  <body>
+    <header>GPS Tracker Dashboard</header>
+
+    <main>
+      <div id="sidebar">
+        <h2>Live Data</h2>
+        <p><strong>Last Updated:</strong> <span id="last-updated">N/A</span></p>
+        <p><strong>Latitude:</strong> <span id="latitude">N/A</span></p>
+        <p><strong>Longitude:</strong> <span id="longitude">N/A</span></p>
+        <p><strong>Speed:</strong> <span id="speed">N/A</span></p>
+        <p>
+          <strong>Current Journey:</strong>
+          <span id="current-journey-id-display">N/A</span>
+        </p>
+
+        <div class="controls">
+          <h2>Mode Control</h2>
+          <label for="modeSelect">Select Device Mode:</label>
+          <select id="modeSelect">
+            <option value="asset_tracking">Asset Tracking (Low Power)</option>
+            <option value="personal_safety">
+              Personal Safety (SOS Enabled)
+            </option>
+            <option value="workout">Workout (High Frequency)</option>
+          </select>
+          <button id="setModeButton">Set Mode</button>
+          <p>
+            Current Device ID: <strong id="deviceIdDisplay">Loading...</strong>
+          </p>
+          <p>Last Set Mode: <strong id="lastSetMode">None</strong></p>
+
+          <hr style="margin: 15px 0" />
+          <button id="startDemoModeButton" style="background-color: #008cba">
+            Start Web App Demo Mode
+          </button>
+          <button
+            id="stopDemoModeButton"
+            style="background-color: #dc3545; margin-left: 10px"
+          >
+            Stop Demo Mode
+          </button>
+          <p><small>Generates dummy data directly to map.</small></p>
+        </div>
+
+        <h2>Journey History</h2>
+        <div id="journey-list">
+          <p>Journeys will appear here.</p>
+        </div>
+      </div>
+
+      <div id="map-container">
+        <p style="text-align: center; padding-top: 20px">
+          Map will load here soon...
+        </p>
+      </div>
+    </main>
+
+    <footer>&copy; 2025 GPS Tracker Project. All rights reserved.</footer>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+
+    <script src="app.js"></script>
+  </body>
+</html>
