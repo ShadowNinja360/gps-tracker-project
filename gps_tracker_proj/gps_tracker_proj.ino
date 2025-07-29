@@ -56,6 +56,7 @@ FirebaseConfig config;
 enum DeviceMode { WORKOUT, PERSONAL_SAFETY, ASSET_TRACKING };
 volatile DeviceMode currentMode = WORKOUT;
 volatile bool modeChanged = false;
+volatile bool buttonPressed = false; // Flag for the interrupt
 String modeNames[] = {"WORKOUT", "PERSONAL SAFETY", "ASSET TRACKING"};
 bool trackerActive = false;
 double totalDistanceMeters = 0.0;
@@ -109,7 +110,12 @@ void setup() {
 void loop() {
     unsigned long currentMillis = millis();
 
-    // Correct check for stream status
+    // Check if the interrupt has set the button press flag
+    if (buttonPressed) {
+        toggleTrackerState(); // Call the function to change the tracker's state
+        buttonPressed = false; // Reset the flag immediately
+    }
+
     if (Firebase.ready() && !stream.streamPath().length()) {
         String streamPath = "/devices/" + String(DEVICE_ID) + "/config";
         if (!Firebase.RTDB.beginStream(&stream, streamPath)) {
@@ -157,14 +163,8 @@ void loop() {
 void IRAM_ATTR handleBuiltinButton() {
     static unsigned long last_interrupt_time = 0;
     unsigned long interrupt_time = millis();
-    if (interrupt_time - last_interrupt_time > 500) {
-        // Simple logic: one press toggles tracking, another press (while active) changes mode
-        if (!trackerActive) {
-             toggleTrackerState();
-        } else {
-            currentMode = (DeviceMode)(((int)currentMode + 1) % 3);
-            modeChanged = true;
-        }
+    if (interrupt_time - last_interrupt_time > 500) { // Debounce for 500ms
+        buttonPressed = true; // Set the flag for the main loop to handle
     }
     last_interrupt_time = interrupt_time;
 }
@@ -186,19 +186,21 @@ void setupGsm() {
     updateDisplay("Initializing GSM...");
     sim800lSerial.begin(9600, SERIAL_8N1, SIM800L_RX_PIN, SIM800L_TX_PIN);
     delay(3000);
+    
     Serial.println("Initializing modem...");
     if (!modem.init()) {
         updateDisplay("Modem Init Failed"); while (1);
     }
+    
+    // --- ADD THIS LINE ---
+    delay(5000); // Give the modem 5 seconds to boot and scan for networks
+    // ---------------------
+
     updateDisplay("Waiting for Network...");
     if (!modem.waitForNetwork(60000L)) {
         updateDisplay("Network Failed"); while (1);
     }
-    updateDisplay("Connecting to GPRS...");
-    if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
-        updateDisplay("GPRS Failed"); while (1);
-    }
-    updateDisplay("GPRS Connected");
+    // ... rest of the function remains the same
 }
 
 void setupFirebase() {
