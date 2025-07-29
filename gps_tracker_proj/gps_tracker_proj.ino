@@ -56,14 +56,16 @@ FirebaseConfig config;
 enum DeviceMode { WORKOUT, PERSONAL_SAFETY, ASSET_TRACKING };
 volatile DeviceMode currentMode = WORKOUT;
 volatile bool modeChanged = false;
-volatile bool buttonPressed = false; // Flag for the interrupt
 String modeNames[] = {"WORKOUT", "PERSONAL SAFETY", "ASSET TRACKING"};
-bool trackerActive = false;
 double totalDistanceMeters = 0.0;
 double lastLat = 0.0;
 double lastLon = 0.0;
 unsigned long journeyID = 0;
 unsigned long lastDataSendMillis = 0;
+
+volatile bool externalButtonPressed = false; // Flag for the external button
+bool trackerIsActive = false; // Is the tracker ON or OFF?
+bool isPaused = false;      // Is the active tracker paused?
 
 // --- Function Prototypes (Forward Declaration) ---
 void streamCallback(FirebaseStream data);
@@ -83,7 +85,7 @@ void generateNewJourneyID();
 void setup() {
     Serial.begin(115200);
     pinMode(BUILTIN_BUTTON, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(BUILTIN_BUTTON), handleBuiltinButton, FALLING);
+    attachInterrupt(digitalPinToInterrupt(EXTERNAL_BUTTON), handleExternalButton, CHANGE);
     pinMode(EXTERNAL_BUTTON, INPUT_PULLUP);
 
     Wire.begin();
@@ -110,35 +112,44 @@ void setup() {
 void loop() {
     unsigned long currentMillis = millis();
 
-    // Check if the interrupt has set the button press flag
-    if (buttonPressed) {
-        toggleTrackerState(); // Call the function to change the tracker's state
-        buttonPressed = false; // Reset the flag immediately
-    }
-
-    if (Firebase.ready() && !stream.streamPath().length()) {
-        String streamPath = "/devices/" + String(DEVICE_ID) + "/config";
-        if (!Firebase.RTDB.beginStream(&stream, streamPath)) {
-            Serial.printf("Error beginning stream: %s\n", stream.errorReason().c_str());
+    // Check if the EXTERNAL button was pressed
+    if (externalButtonPressed) {
+        if (!trackerIsActive) {
+            // If tracker is OFF, the first press turns it ON.
+            trackerIsActive = true;
+            isPaused = false; // Start in a "playing" state
+            generateNewJourneyID(); // Start a new journey
+            updateDisplay("Tracker ON", "Mode: " + modeNames[(int)currentMode]);
         } else {
-            Firebase.RTDB.setStreamCallback(&stream, streamCallback, streamTimeoutCallback);
+            // If tracker is already ON, subsequent presses toggle Play/Pause or other actions.
+            // This is where you would handle mode-specific actions.
+            // For now, we'll just toggle pause for simplicity.
+            isPaused = !isPaused;
+            if (isPaused) {
+                updateDisplay("PAUSED", "Mode: " + modeNames[(int)currentMode]);
+            } else {
+                updateDisplay("RESUMED", "Mode: " + modeNames[(int)currentMode]);
+            }
         }
+        externalButtonPressed = false; // Reset the flag
+        delay(500); // Small delay to prevent visual glitches
     }
 
+    // Handle mode changes triggered by the INTERNAL button
     if (modeChanged) {
-        updateDisplay("Mode Changed:", modeNames[(int)currentMode]);
+        updateDisplay("Mode Changed:", modeNames[(int)currentMode], "Tracker is OFF");
         reportStatusToFirebase();
         delay(1500);
         modeChanged = false;
     }
-
-    handleExternalButton();
-
+    
+    // Always process incoming GPS data in the background
     while (gpsSerial.available() > 0) {
         gps.encode(gpsSerial.read());
     }
 
-    if (trackerActive) {
+    // Only send data if the tracker is active AND not paused
+    if (trackerIsActive && !isPaused) {
         if (gps.location.isUpdated() && gps.location.isValid()) {
              if (lastLat != 0.0 || lastLon != 0.0) {
                 totalDistanceMeters += TinyGPSPlus::distanceBetween(gps.location.lat(), gps.location.lng(), lastLat, lastLon);
@@ -153,7 +164,7 @@ void loop() {
             if (gps.location.isValid()) {
                 sendDataToServer();
             } else {
-                updateDisplay("Status: ACTIVE", "No GPS Signal...");
+                updateDisplay("Status: LIVE", "No GPS Signal...");
             }
             lastDataSendMillis = currentMillis;
         }
@@ -163,23 +174,13 @@ void loop() {
 void IRAM_ATTR handleBuiltinButton() {
     static unsigned long last_interrupt_time = 0;
     unsigned long interrupt_time = millis();
-    if (interrupt_time - last_interrupt_time > 500) { // Debounce for 500ms
-        buttonPressed = true; // Set the flag for the main loop to handle
+    if (interrupt_time - last_interrupt_time > 500) { // Debounce
+        currentMode = (DeviceMode)(((int)currentMode + 1) % 3);
+        trackerIsActive = false; // As requested, turn tracker OFF on mode change
+        isPaused = false;        // Reset pause state
+        modeChanged = true;      // Set flag for the loop to handle the display update
     }
     last_interrupt_time = interrupt_time;
-}
-
-void toggleTrackerState() {
-    trackerActive = !trackerActive;
-    if (trackerActive) {
-        totalDistanceMeters = 0.0;
-        lastLat = 0.0;
-        lastLon = 0.0;
-        generateNewJourneyID();
-        updateDisplay("Tracker: ON", "Mode: " + modeNames[(int)currentMode]);
-    } else {
-        updateDisplay("Tracker: OFF");
-    }
 }
 
 void setupGsm() {
@@ -287,19 +288,14 @@ void reportStatusToFirebase() {
     }
 }
 
-void handleExternalButton() {
-    if (digitalRead(EXTERNAL_BUTTON) == LOW) {
-        delay(50);
-        if (digitalRead(EXTERNAL_BUTTON) == LOW) {
-            String action = "Ext. Button Action\nMode: " + modeNames[(int)currentMode];
-             if(currentMode == PERSONAL_SAFETY){
-                action = "!!! SOS !!!\nSending Alert...";
-             }
-            updateDisplay(action);
-            delay(2000);
-            while(digitalRead(EXTERNAL_BUTTON) == LOW);
-        }
+// Add this new function for the external button
+void IRAM_ATTR handleExternalButton() {
+    static unsigned long last_interrupt_time = 0;
+    unsigned long interrupt_time = millis();
+    if (interrupt_time - last_interrupt_time > 500) { // Debounce
+        externalButtonPressed = true; // Set the flag for the main loop to handle
     }
+    last_interrupt_time = interrupt_time;
 }
 
 DeviceMode stringToMode(String modeStr) {
