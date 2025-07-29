@@ -71,19 +71,19 @@ bool isPaused = false;      // Is the active tracker paused?
 void streamCallback(FirebaseStream data);
 void streamTimeoutCallback(bool timeout);
 void IRAM_ATTR handleBuiltinButton();
-void toggleTrackerState();
+void IRAM_ATTR handleExternalButton();
 void setupGsm();
 void setupFirebase();
 void sendDataToServer();
 void updateDisplay(String line1, String line2 = "", String line3 = "", String line4 = "");
 void reportStatusToFirebase();
-void handleExternalButton();
 DeviceMode stringToMode(String modeStr);
 void generateNewJourneyID();
 
 
 void setup() {
     Serial.begin(115200);
+    attachInterrupt(digitalPinToInterrupt(BUILTIN_BUTTON), handleBuiltinButton, FALLING);
     pinMode(BUILTIN_BUTTON, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(EXTERNAL_BUTTON), handleExternalButton, CHANGE);
     pinMode(EXTERNAL_BUTTON, INPUT_PULLUP);
@@ -238,33 +238,47 @@ void streamTimeoutCallback(bool timeout) {
 
 void sendDataToServer() {
     updateDisplay("Sending Data...", "Lat: " + String(lastLat, 4), "Lon: " + String(lastLon, 4));
-    if (!client.connect(server, 80)) {
-        updateDisplay("Error:", "Server Connect Fail");
-        return;
-    }
 
-    String postData = "{\"journey_id\": \"" + String(journeyID) +
-                      "\",\"latitude\":" + String(lastLat, 6) +
-                      ",\"longitude\":" + String(lastLon, 6) +
-                      ",\"speed_kmph\":" + String(gps.speed.kmph(), 2) +
-                      ",\"total_distance_meters\":" + String(totalDistanceMeters, 2) + "}";
+    int maxRetries = 3;
+    for (int i = 0; i < maxRetries; i++) {
+        Serial.printf("Connecting to server... (Attempt %d/%d)\n", i + 1, maxRetries);
+        if (client.connect(server, 80)) {
+            // --- If connection is successful ---
+            Serial.println("Connection successful!");
 
-    String request = "POST " + resource + " HTTP/1.1\r\n";
-    request += "Host: " + String(server) + "\r\n";
-    request += "Content-Type: application/json\r\n";
-    request += "Content-Length: " + String(postData.length()) + "\r\n\r\n" + postData;
-    
-    client.print(request);
-    
-    unsigned long timeout = millis();
-    while (client.connected() && millis() - timeout < 5000L) {
-        if (client.available()) {
-            Serial.write(client.read());
+            String postData = "{\"journey_id\": \"" + String(journeyID) +
+                              "\",\"latitude\":" + String(lastLat, 6) +
+                              ",\"longitude\":" + String(lastLon, 6) +
+                              ",\"speed_kmph\":" + String(gps.speed.kmph(), 2) +
+                              ",\"total_distance_meters\":" + String(totalDistanceMeters, 2) + "}";
+
+            String request = "POST " + resource + " HTTP/1.1\r\n";
+            request += "Host: " + String(server) + "\r\n";
+            request += "Content-Type: application/json\r\n";
+            request += "Content-Length: " + String(postData.length()) + "\r\n\r\n" + postData;
+            
+            client.print(request);
+            
+            unsigned long timeout = millis();
+            while (client.connected() && millis() - timeout < 5000L) {
+                if (client.available()) {
+                    Serial.write(client.read());
+                }
+            }
+            
+            client.stop();
+            updateDisplay("Data Sent!", "Mode: " + modeNames[(int)currentMode]);
+            return; // Exit the function on success
         }
+
+        // --- If connection fails, wait and retry ---
+        Serial.println("Connection failed. Retrying in 5 seconds...");
+        delay(5000);
     }
-    
-    client.stop();
-    updateDisplay("Data Sent!", "Mode: " + modeNames[(int)currentMode]);
+
+    // --- If all retries fail ---
+    Serial.println("Server connect failed after multiple retries.");
+    updateDisplay("Error:", "Server Connect Fail");
 }
 
 void updateDisplay(String line1, String line2, String line3, String line4) {
