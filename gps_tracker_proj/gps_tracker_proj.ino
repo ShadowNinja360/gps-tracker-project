@@ -30,7 +30,7 @@ const char gprsUser[] = "";
 const char gprsPass[] = "";
 
 // --- Firebase Configuration ---
-#define API_KEY "YOUR_FIREBASE_API_KEY" // Your Firebase Web API Key
+#define API_KEY "AIzaSyDSauIYdrgdpHV2eDqo4UILnwhLk3oVIgk" // Your Firebase Web API Key
 #define DATABASE_URL "https://gps-tracker-59cb6-default-rtdb.firebaseio.com"
 
 // --- Server Configuration ---
