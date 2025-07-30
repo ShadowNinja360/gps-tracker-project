@@ -48,11 +48,11 @@ const defaultZoom = 5;
 
 // --- Global State ---
 let activeJourneyId = null;
-let liveLocationUnsubscribe = null; // To stop listening to old journeys
+let liveLocationUnsubscribe = null;
+let deviceStatusUnsubscribe = null; // To stop listening to old device status
 
 // --- Functions ---
 
-// Initializes the Leaflet map
 function initializeMap() {
   map = L.map("map-container").setView(
     [lastKnownLat, lastKnownLon],
@@ -72,7 +72,6 @@ function initializeMap() {
   );
 }
 
-// Updates the live data display and map marker
 function updateLiveDisplay(lat, lon, speed, timestamp) {
   lastKnownLat = lat;
   lastKnownLon = lon;
@@ -88,14 +87,54 @@ function updateLiveDisplay(lat, lon, speed, timestamp) {
   speedSpan.textContent = (speed || 0).toFixed(2) + " km/h";
 }
 
-// Sets up a listener for live location updates for a specific journey ID
-function setupLiveLocationListener(journeyId) {
-  if (liveLocationUnsubscribe) {
-    liveLocationUnsubscribe(); // Stop listening to the previous journey
+// THIS IS THE NEW DYNAMIC FUNCTION FOR MODE CONTROL
+function setupDeviceListeners(deviceId) {
+  if (!deviceId) return;
+
+  activeJourneyId = deviceId;
+  currentSelectedJourneyIdDisplay.textContent = deviceId;
+  deviceIdDisplay.textContent = deviceId; // Update the display for mode control
+
+  // Stop listening to the old device status
+  if (deviceStatusUnsubscribe) {
+    deviceStatusUnsubscribe();
   }
 
-  activeJourneyId = journeyId;
-  currentSelectedJourneyIdDisplay.textContent = journeyId;
+  const deviceConfigRef = rtdb.ref(`devices/${deviceId}/config`);
+  const deviceStatusRef = rtdb.ref(`devices/${deviceId}/status`);
+
+  // Set up the listener for the mode control button
+  setModeButton.onclick = () => {
+    const selectedMode = modeSelect.value;
+    console.log(`Setting mode for device ${deviceId} to: ${selectedMode}`);
+    deviceConfigRef
+      .update({
+        mode: selectedMode,
+        timestamp: firebase.database.ServerValue.TIMESTAMP,
+      })
+      .then(() =>
+        alert(`Mode set to "${selectedMode}" for device ${deviceId}.`)
+      )
+      .catch((error) => console.error("Error setting mode:", error));
+  };
+
+  // Listen for status updates from the currently active device
+  deviceStatusUnsubscribe = deviceStatusRef.on("value", (snapshot) => {
+    const statusData = snapshot.val();
+    if (statusData && statusData.currentMode) {
+      lastSetModeDisplay.textContent = statusData.currentMode;
+    }
+  });
+}
+
+function setupLiveLocationListener(journeyId) {
+  if (liveLocationUnsubscribe) {
+    liveLocationUnsubscribe();
+  }
+
+  // Set up the mode controls to target this new, active journey
+  setupDeviceListeners(journeyId);
+
   console.log("Now listening for live data from Journey ID:", journeyId);
 
   liveLocationUnsubscribe = db
@@ -108,7 +147,6 @@ function setupLiveLocationListener(journeyId) {
       (snapshot) => {
         if (!snapshot.empty) {
           const latestPoint = snapshot.docs[0].data();
-          console.log("New live data received:", latestPoint);
           updateLiveDisplay(
             latestPoint.latitude,
             latestPoint.longitude,
@@ -123,25 +161,22 @@ function setupLiveLocationListener(journeyId) {
     );
 }
 
-// Listens for changes in the 'journeys' collection to update the sidebar list
 function setupJourneyListListener() {
   db.collection("journeys")
     .orderBy("last_updated_server", "desc")
-    .limit(10) // Get the 10 most recent journeys
+    .limit(10)
     .onSnapshot(
       (snapshot) => {
-        journeyListDiv.innerHTML = ""; // Clear the list
+        journeyListDiv.innerHTML = "";
         if (snapshot.empty) {
           journeyListDiv.innerHTML = "<p>No journeys recorded yet.</p>";
           return;
         }
 
-        // --- AUTOMATICALLY LISTEN TO THE NEWEST JOURNEY ---
         const latestJourneyId = snapshot.docs[0].id;
         if (latestJourneyId !== activeJourneyId) {
           setupLiveLocationListener(latestJourneyId);
         }
-        // ----------------------------------------------------
 
         snapshot.forEach((doc) => {
           const journeyId = doc.id;
@@ -151,13 +186,10 @@ function setupJourneyListListener() {
           journeyLi.style.cursor = "pointer";
           journeyLi.style.padding = "8px 0";
           journeyLi.style.borderBottom = "1px dotted #ccc";
-
-          // Highlight the currently active journey
           if (journeyId === activeJourneyId) {
             journeyLi.style.fontWeight = "bold";
             journeyLi.style.backgroundColor = "#e0e0e0";
           }
-
           journeyListDiv.appendChild(journeyLi);
         });
       },
@@ -166,38 +198,6 @@ function setupJourneyListListener() {
       }
     );
 }
-
-// --- Mode Switching Logic ---
-const deviceConfigRef = rtdb.ref("devices/" + "12345" + "/config");
-const deviceStatusRef = rtdb.ref("devices/" + "12345" + "/status");
-
-if (setModeButton) {
-  deviceIdDisplay.textContent = "12345";
-  setModeButton.addEventListener("click", () => {
-    const selectedMode = modeSelect.value;
-    console.log(`Setting mode for device to: ${selectedMode}`);
-
-    deviceConfigRef
-      .update({
-        mode: selectedMode,
-        timestamp: firebase.database.ServerValue.TIMESTAMP,
-      })
-      .then(() => alert(`Mode set to "${selectedMode}"`))
-      .catch((error) => console.error("Error setting mode:", error));
-  });
-}
-
-// Listen for the device's reported status
-deviceStatusRef.on(
-  "value",
-  (snapshot) => {
-    const statusData = snapshot.val();
-    if (statusData && statusData.currentMode) {
-      lastSetModeDisplay.textContent = statusData.currentMode;
-    }
-  },
-  (error) => console.error("Error listening to device status:", error)
-);
 
 // --- Initialize the dashboard when the page loads ---
 document.addEventListener("DOMContentLoaded", () => {
