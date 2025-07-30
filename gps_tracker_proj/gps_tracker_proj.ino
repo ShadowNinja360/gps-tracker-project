@@ -320,7 +320,7 @@ DeviceMode stringToMode(String modeStr) {
 }
 
 void generateNewJourneyID() {
-  journeyID = millis() + random(100000);
-  Serial.print("New Journey ID: ");
+  journeyID = atol(DEVICE_ID); // Convert the defined ID to a number
+  Serial.print("Using Fixed Journey ID: ");
   Serial.println(journeyID);
 }
