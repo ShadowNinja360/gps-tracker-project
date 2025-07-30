@@ -62,6 +62,8 @@ double lastLat = 0.0;
 double lastLon = 0.0;
 unsigned long journeyID = 0;
 unsigned long lastDataSendMillis = 0;
+unsigned long tokenRefreshMillis = 0; // Timer for token refresh
+bool isAuthenticated = false;         // Flag to track auth status
 
 volatile bool externalButtonPressed = false; // Flag for the external button
 bool trackerIsActive = false; // Is the tracker ON or OFF?
@@ -83,10 +85,10 @@ void generateNewJourneyID();
 
 void setup() {
     Serial.begin(115200);
-    attachInterrupt(digitalPinToInterrupt(BUILTIN_BUTTON), handleBuiltinButton, FALLING);
     pinMode(BUILTIN_BUTTON, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(EXTERNAL_BUTTON), handleExternalButton, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(BUILTIN_BUTTON), handleBuiltinButton, FALLING);
     pinMode(EXTERNAL_BUTTON, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(EXTERNAL_BUTTON), handleExternalButton, CHANGE);
 
     Wire.begin();
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
@@ -215,6 +217,17 @@ void setupFirebase() {
 
     Firebase.begin(&config, &auth);
     Firebase.reconnectWiFi(true);
+
+    // Wait for the anonymous sign-in to complete
+    updateDisplay("Authenticating...");
+    while (Firebase.getToken() == "") {
+        Serial.print(".");
+        delay(500);
+    }
+    isAuthenticated = true;
+    tokenRefreshMillis = millis();
+    updateDisplay("Firebase Ready!");
+    delay(1000);
 }
 
 void streamCallback(FirebaseStream data) {
@@ -237,47 +250,43 @@ void streamTimeoutCallback(bool timeout) {
 }
 
 void sendDataToServer() {
+    // Check if the token needs to be refreshed (tokens expire after 1 hour)
+    if (isAuthenticated && (millis() - tokenRefreshMillis > 3300 * 1000)) { // Refresh every 55 mins
+        tokenRefreshMillis = millis();
+        Firebase.refreshToken(&config);
+        Serial.println("Refreshed Firebase token.");
+    }
+
+    if (!isAuthenticated || Firebase.getToken() == "") {
+        updateDisplay("Error:", "Not Authenticated!");
+        return;
+    }
+
     updateDisplay("Sending Data...", "Lat: " + String(lastLat, 4), "Lon: " + String(lastLon, 4));
 
     int maxRetries = 3;
     for (int i = 0; i < maxRetries; i++) {
-        Serial.printf("Connecting to server... (Attempt %d/%d)\n", i + 1, maxRetries);
         if (client.connect(server, 80)) {
-            // --- If connection is successful ---
-            Serial.println("Connection successful!");
-
             String postData = "{\"journey_id\": \"" + String(journeyID) +
                               "\",\"latitude\":" + String(lastLat, 6) +
                               ",\"longitude\":" + String(lastLon, 6) +
                               ",\"speed_kmph\":" + String(gps.speed.kmph(), 2) +
                               ",\"total_distance_meters\":" + String(totalDistanceMeters, 2) + "}";
 
+            // --- THIS IS THE CRITICAL SECURITY CHANGE ---
             String request = "POST " + resource + " HTTP/1.1\r\n";
             request += "Host: " + String(server) + "\r\n";
+            request += "Authorization: Bearer " + String(Firebase.getToken()) + "\r\n"; // Add the auth token
             request += "Content-Type: application/json\r\n";
             request += "Content-Length: " + String(postData.length()) + "\r\n\r\n" + postData;
-            
+
             client.print(request);
-            
-            unsigned long timeout = millis();
-            while (client.connected() && millis() - timeout < 5000L) {
-                if (client.available()) {
-                    Serial.write(client.read());
-                }
-            }
-            
             client.stop();
             updateDisplay("Data Sent!", "Mode: " + modeNames[(int)currentMode]);
-            return; // Exit the function on success
+            return;
         }
-
-        // --- If connection fails, wait and retry ---
-        Serial.println("Connection failed. Retrying in 5 seconds...");
         delay(5000);
     }
-
-    // --- If all retries fail ---
-    Serial.println("Server connect failed after multiple retries.");
     updateDisplay("Error:", "Server Connect Fail");
 }
 
