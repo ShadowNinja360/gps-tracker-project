@@ -18,7 +18,23 @@ exports.receiveGPSData = functions.https.onRequest(async (req, res) => {
   // This must be done for all responses that are accessed cross-origin
   res.set("Access-Control-Allow-Origin", "*"); // Allow requests from any origin (for testing)
   // For production, replace '*' with your specific domain: e.g., 'https://gps-tracker-59cb6.web.app'
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    console.error(
+      "No Firebase ID token was passed as a Bearer token in the Authorization header."
+    );
+    return res.status(403).send("Unauthorized: No token provided.");
+  }
 
+  const idToken = authHeader.split("Bearer ")[1];
+  try {
+    // Verify the ID token using the Firebase Admin SDK
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    console.log("Authenticated request from UID:", decodedToken.uid);
+  } catch (error) {
+    console.error("Error while verifying Firebase ID token:", error);
+    return res.status(403).send("Unauthorized: Invalid token.");
+  }
   // 3. Ensure it's a POST request for data processing
   if (req.method !== "POST") {
     return res
@@ -80,37 +96,38 @@ exports.receiveGPSData = functions.https.onRequest(async (req, res) => {
 
   // --- Store Data to Firestore ---
   try {
-    const journeyRef = db.collection("journeys").doc(journeyId);
+    const rtdb = admin.database();
+    const journeyRef = rtdb.ref(`journeys/${journeyId}`);
 
-    await journeyRef.collection("points").add({
+    // Push a new data point to the 'points' list for this journey
+    await journeyRef.child("points").push({
       latitude: lat,
       longitude: lon,
       speed_kmph: isNaN(speed) ? null : speed,
       total_distance_meters: isNaN(distance) ? null : distance,
-      timestamp: admin.firestore.Timestamp.fromMillis(parseInt(timestamp)),
-      receivedAt: admin.firestore.FieldValue.serverTimestamp(),
+      timestamp: parseInt(timestamp), // Store timestamp as milliseconds
+      receivedAt: admin.database.ServerValue.TIMESTAMP, // Server timestamp for RTDB
     });
 
-    await journeyRef.set(
-      {
-        last_latitude: lat,
-        last_longitude: lon,
-        last_speed_kmph: isNaN(speed) ? null : speed,
-        last_total_distance_meters: isNaN(distance) ? null : distance,
-        last_updated_device: admin.firestore.Timestamp.fromMillis(
-          parseInt(timestamp)
-        ),
-        last_updated_server: admin.firestore.FieldValue.serverTimestamp(),
-        is_active: true,
-      },
-      { merge: true }
-    );
+    // Update the summary data for the journey's root
+    await journeyRef.update({
+      last_latitude: lat,
+      last_longitude: lon,
+      last_speed_kmph: isNaN(speed) ? null : speed,
+      last_total_distance_meters: isNaN(distance) ? null : distance,
+      last_updated_device: parseInt(timestamp),
+      last_updated_server: admin.database.ServerValue.TIMESTAMP,
+      is_active: true,
+    });
 
     return res
       .status(200)
-      .json({ status: "success", message: "Data received and stored." });
+      .json({
+        status: "success",
+        message: "Data received and stored in RTDB.",
+      });
   } catch (error) {
-    console.error("Error writing to Firestore:", error);
+    console.error("Error writing to Realtime Database:", error);
     return res.status(500).send("Error processing data: " + error.message);
   }
 });

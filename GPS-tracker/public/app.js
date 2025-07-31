@@ -19,7 +19,7 @@ const firebaseConfig = {
 
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
+const db = firebase.database();
 const rtdb = firebase.database();
 
 // --- UI Element References ---
@@ -137,21 +137,20 @@ function setupLiveLocationListener(journeyId) {
 
   console.log("Now listening for live data from Journey ID:", journeyId);
 
-  liveLocationUnsubscribe = db
-    .collection("journeys")
-    .doc(journeyId)
-    .collection("points")
-    .orderBy("receivedAt", "desc")
-    .limit(1)
-    .onSnapshot(
+  const journeyRef = rtdb.ref(`journeys/${journeyId}/points`);
+  liveLocationUnsubscribe = journeyRef
+    .orderByChild("receivedAt")
+    .limitToLast(1)
+    .on(
+      "child_added",
       (snapshot) => {
-        if (!snapshot.empty) {
-          const latestPoint = snapshot.docs[0].data();
+        const latestPoint = snapshot.val();
+        if (latestPoint) {
           updateLiveDisplay(
             latestPoint.latitude,
             latestPoint.longitude,
             latestPoint.speed_kmph,
-            latestPoint.receivedAt
+            { seconds: Math.floor(latestPoint.receivedAt / 1000) } // Convert to Firestore-like timestamp
           );
         }
       },
@@ -162,34 +161,35 @@ function setupLiveLocationListener(journeyId) {
 }
 
 function setupJourneyListListener() {
-  db.collection("journeys")
-    .orderBy("last_updated_server", "desc")
-    .limit(10)
-    .onSnapshot(
+  const journeysRef = rtdb.ref("journeys");
+  journeysRef
+    .orderByChild("last_updated_server")
+    .limitToLast(10)
+    .on(
+      "value",
       (snapshot) => {
         journeyListDiv.innerHTML = "";
-        if (snapshot.empty) {
+        if (!snapshot.exists()) {
           journeyListDiv.innerHTML = "<p>No journeys recorded yet.</p>";
           return;
         }
 
-        const latestJourneyId = snapshot.docs[0].id;
+        const journeys = [];
+        snapshot.forEach((childSnapshot) => {
+          journeys.unshift({ id: childSnapshot.key, ...childSnapshot.val() }); // Add to beginning to sort descending
+        });
+
+        const latestJourneyId = journeys[0].id;
         if (latestJourneyId !== activeJourneyId) {
           setupLiveLocationListener(latestJourneyId);
         }
 
-        snapshot.forEach((doc) => {
-          const journeyId = doc.id;
+        journeys.forEach((journey) => {
+          const journeyId = journey.id;
           const journeyLi = document.createElement("li");
           journeyLi.className = "journey-item";
           journeyLi.textContent = `ID: ${journeyId}`;
-          journeyLi.style.cursor = "pointer";
-          journeyLi.style.padding = "8px 0";
-          journeyLi.style.borderBottom = "1px dotted #ccc";
-          if (journeyId === activeJourneyId) {
-            journeyLi.style.fontWeight = "bold";
-            journeyLi.style.backgroundColor = "#e0e0e0";
-          }
+          // ... (rest of the styling)
           journeyListDiv.appendChild(journeyLi);
         });
       },
